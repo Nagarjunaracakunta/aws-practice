@@ -133,19 +133,25 @@ resource "aws_api_gateway_deployment" "this" {
 }
 
 resource "aws_api_gateway_stage" "this" {
-  deployment_id        = aws_api_gateway_deployment.this.id
-  rest_api_id          = aws_api_gateway_rest_api.this.id
-  stage_name           = var.stage_name
-  xray_tracing_enabled = var.enable_xray
+  stage_name    = "dev"
+  rest_api_id   = aws_api_gateway_rest_api.this.id
+  deployment_id = aws_api_gateway_deployment.this.id
 
-  dynamic "access_log_settings" {
-    for_each = var.access_log_destination_arn != "" ? [1] : []
-    content {
-      destination_arn = var.access_log_destination_arn
-    }
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway.arn
+    format          = jsonencode({
+      requestId      = "$context.requestId"
+      ip             = "$context.identity.sourceIp"
+      caller         = "$context.identity.caller"
+      user           = "$context.identity.user"
+      requestTime    = "$context.requestTime"
+      httpMethod     = "$context.httpMethod"
+      resourcePath   = "$context.resourcePath"
+      status         = "$context.status"
+      protocol       = "$context.protocol"
+      responseLength = "$context.responseLength"
+    })
   }
-
-  tags = merge(var.tags, { Name = "${var.api_name}-${var.stage_name}" })
 }
 
 resource "aws_api_gateway_method_settings" "all" {
