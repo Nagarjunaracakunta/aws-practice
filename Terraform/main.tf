@@ -44,133 +44,6 @@ module "s3_app" {
   ]
 }
 
-# ─── DynamoDB ──────────────────────────────────────────────────────────────────
-
-module "dynamodb" {
-  source = "./modules/dynamodb"
-
-  table_name             = "${local.name}-${var.dynamodb_table_name}"
-  billing_mode           = var.dynamodb_billing_mode
-  hash_key               = var.dynamodb_hash_key
-  range_key              = var.dynamodb_range_key
-  point_in_time_recovery = true
-  tags                   = local.tags
-}
-
-# ─── Cognito ───────────────────────────────────────────────────────────────────
-
-module "cognito" {
-  source = "./modules/cognito"
-
-  user_pool_name     = "${local.name}-user-pool"
-  mfa_configuration  = var.cognito_mfa
-  domain             = var.cognito_domain_prefix
-  tags               = local.tags
-
-  app_clients = [
-    {
-      name                  = "web-client"
-      generate_secret       = false
-      explicit_auth_flows   = ["ALLOW_USER_SRP_AUTH", "ALLOW_REFRESH_TOKEN_AUTH", "ALLOW_USER_PASSWORD_AUTH"]
-      access_token_validity = 1
-      id_token_validity     = 1
-      refresh_token_validity = 30
-    }
-  ]
-}
-
-# ─── Lambda ────────────────────────────────────────────────────────────────────
-
-module "lambda_api" {
-  source = "./modules/lambda"
-
-  function_name = "${local.name}-api-handler"
-  description   = "Main API handler Lambda for ${local.name}"
-  handler       = "index.handler"
-  runtime       = var.lambda_runtime
-  memory_size   = var.lambda_memory_size
-  timeout       = var.lambda_timeout
-
-  # Provide a placeholder zip or point to your build artifact
-  filename         = "${path.module}/lambda/placeholder.zip"
-  source_code_hash = filebase64sha256("${path.module}/lambda/placeholder.zip")
-
-  vpc_config = {
-    vpc_id     = module.vpc.vpc_id
-    subnet_ids = module.vpc.private_subnet_ids
-  }
-
-  environment_variables = {
-    ENVIRONMENT        = var.environment
-    DYNAMODB_TABLE     = module.dynamodb.table_name
-    S3_BUCKET          = module.s3_app.bucket_id
-    COGNITO_USER_POOL  = module.cognito.user_pool_id
-  }
-
-  iam_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess",
-    "arn:aws:iam::aws:policy/AmazonS3FullAccess",
-  ]
-
-  api_gateway_source_arn = module.api_gateway.execution_arn
-  log_retention_days     = 14
-  tags                   = local.tags
-}
-
-# ─── API Gateway ───────────────────────────────────────────────────────────────
-
-module "api_gateway" {
-  source = "./modules/api_gateway"
-
-  api_name   = "${local.name}-api"
-  stage_name = var.api_stage_name
-  enable_cors = true
-
-  resources = [
-    { path_part = "users" },
-    { path_part = "items" },
-    { path_part = "health" },
-  ]
-
-  methods = [
-    {
-      resource_path     = "health"
-      http_method       = "GET"
-      authorization     = "NONE"
-      lambda_invoke_arn = module.lambda_api.invoke_arn
-    },
-    {
-      resource_path     = "users"
-      http_method       = "GET"
-      authorization     = "COGNITO_USER_POOLS"
-      lambda_invoke_arn = module.lambda_api.invoke_arn
-    },
-    {
-      resource_path     = "users"
-      http_method       = "POST"
-      authorization     = "COGNITO_USER_POOLS"
-      lambda_invoke_arn = module.lambda_api.invoke_arn
-    },
-    {
-      resource_path     = "items"
-      http_method       = "GET"
-      authorization     = "COGNITO_USER_POOLS"
-      lambda_invoke_arn = module.lambda_api.invoke_arn
-    },
-    {
-      resource_path     = "items"
-      http_method       = "POST"
-      authorization     = "COGNITO_USER_POOLS"
-      lambda_invoke_arn = module.lambda_api.invoke_arn
-    },
-  ]
-
-  cognito_user_pool_arns     = [module.cognito.user_pool_arn]
-  throttling_rate_limit      = var.api_throttling_rate_limit
-  throttling_burst_limit     = var.api_throttling_burst_limit
-  tags                       = local.tags
-}
-
 # ─── EC2 ───────────────────────────────────────────────────────────────────────
 
 module "ec2" {
@@ -178,23 +51,36 @@ module "ec2" {
 
   name           = "${local.name}-app"
   vpc_id         = module.vpc.vpc_id
-  subnet_ids     = module.vpc.private_subnet_ids
+  subnet_ids     = module.vpc.public_subnet_ids
   instance_type  = var.ec2_instance_type
   instance_count = var.ec2_instance_count
   public_key     = var.ec2_public_key
 
   ingress_rules = [
     {
-      from_port   = 8080
-      to_port     = 8080
+      from_port   = 22
+      to_port     = 22
       protocol    = "tcp"
-      cidr_blocks = [var.vpc_cidr]
-      description = "App port from VPC"
+      cidr_blocks = ["0.0.0.0/0"]
+      description = "SSH access"
+    },
+    {
+      from_port   = 80
+      to_port     = 80
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+      description = "HTTP"
+    },
+    {
+      from_port   = 443
+      to_port     = 443
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+      description = "HTTPS"
     }
   ]
 
   iam_policy_arns = [
-    "arn:aws:iam::aws:policy/AmazonDynamoDBReadOnlyAccess",
     "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess",
   ]
 
