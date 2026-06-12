@@ -14,5 +14,5 @@ ec2_instance_count = 1
 # ec2_public_key = "ssh-rsa AAAA..."   # paste your public key to enable SSH key auth
 
 # S3 — must be globally unique across all AWS accounts
-s3_bucket_name       = "aws-practice-dev-assets-CHANGEME"
+s3_bucket_name       = "aws-practice-dev-assets-337023347583"
 s3_enable_versioning = true
